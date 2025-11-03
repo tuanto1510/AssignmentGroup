@@ -63,17 +63,36 @@ CREATE TABLE KhachHang (
     HangThanhVien NVARCHAR(50) DEFAULT 'Normal',
     CONSTRAINT chk_diem CHECK (DiemTichLuy >= 0)
 );
+CREATE TABLE NhanVien (
+    IdNhanVien INT PRIMARY KEY,
+    HoTen VARCHAR(100) NOT NULL,
+    Email VARCHAR(100) UNIQUE,
+    Sdt VARCHAR(15),
+    NgaySinh DATE,
+    GioiTinh VARCHAR(10),
+    ChucVu VARCHAR(50) NOT NULL,
+    Luong DECIMAL(12, 2),
+    NgayVaoLam DATE
+);
+
 
 -- Bảng Đặt Vé
 CREATE TABLE DatVe (
     IdDatVe INT PRIMARY KEY IDENTITY(1,1),
     IdKhachHang INT,
+	IdNhanVien INT,
     MaSuatChieu INT,
     NgayDat DATETIME DEFAULT CURRENT_TIMESTAMP,
     TongTien DECIMAL(10, 2),
     TrangThai NVARCHAR(50) DEFAULT 'Da thanh toan',
     CONSTRAINT fk_datve_khachhang FOREIGN KEY (IdKhachHang) REFERENCES KhachHang(IdKhachHang),
-    CONSTRAINT fk_datve_suatchieu FOREIGN KEY (MaSuatChieu) REFERENCES SuatChieu(MaSuatChieu)
+    CONSTRAINT fk_datve_suatchieu FOREIGN KEY (MaSuatChieu) REFERENCES SuatChieu(MaSuatChieu),
+	CONSTRAINT CHK_NhanVienDatVe CHECK (
+	EXISTS (SELECT 1 FROM NhanVien nv
+	where nv.IdNhanVien = DatVe.IdNhanVien
+	and nv.ChucVu IN ('Nhan Vien Ban Ve', 'Nhan Vien Quay')
+	)
+  )
 );
 
 -- Bảng Chi Tiết Đặt Vé (Bảng trung gian)
@@ -140,6 +159,28 @@ VALUES
 (1, 1, 6, 90000.00, 180000.00, N'Thẻ tín dụng', N'Hoàn thành', '2024-01-15 14:35:00'),
 (2, 2, 12, 120000.00, 240000.00, N'Ví điện tử', N'Hoàn thành', '2024-01-16 10:20:00');
 
+-- Chèn dữ liệu vào bảng NhanVien (8 nhân viên)
+INSERT INTO NhanVien (HoTen, Email, Sdt, NgaySinh, GioiTinh, ChucVu, Luong, NgayVaoLam) VALUES
+-- Quản lý
+('Nguyễn Văn An', 'nguyenvanan@rapchieuphim.com', '0901234567', '1985-03-15', 'Nam', 'Quan Ly', 20000000, '2020-01-15'),
+
+-- Nhân viên bán vé
+('Lê Văn Cường', 'levancuong@rapchieuphim.com', '0901234569', '1995-11-30', 'Nam', 'Nhan Vien Ban Ve', 12000000, '2022-03-01'),
+('Phạm Thị Dung', 'phamthidung@rapchieuphim.com', '0901234570', '1998-04-18', 'Nữ', 'Nhan Vien Ban Ve', 11500000, '2023-01-20'),
+
+-- Nhân viên soát vé
+('Vũ Thị Em', 'vuthiem@rapchieuphim.com', '0901234572', '1999-12-10', 'Nữ', 'Nhan Vien Soat Ve', 8000000, '2023-03-10'),
+('Đặng Văn Phong', 'dangvanphong@rapchieuphim.com', '0901234573', '1996-07-25', 'Nam', 'Nhan Vien Soat Ve', 8200000, '2022-11-05'),
+
+-- Nhân viên bếp
+('Trần Thị Hương', 'tranthihuong@rapchieuphim.com', '0901234574', '1997-03-12', 'Nữ', 'Nhan Vien Bep', 9000000, '2022-06-20'),
+
+-- Nhân viên vệ sinh
+('Nguyễn Văn Hùng', 'nguyenvanhung@rapchieuphim.com', '0901234575', '1990-08-08', 'Nam', 'Nhan Vien Ve Sinh', 7000000, '2021-09-15'),
+
+-- Kỹ thuật viên
+('Lý Thị Kim', 'lythikim@rapchieuphim.com', '0901234576', '1994-05-30', 'Nữ', 'Ky Thuat Vien', 11000000, '2022-02-10');
+
 -- Cài đặt Index để tăng tốc truy vấn
 CREATE INDEX idx_phim_theloai ON Phim(TheLoai);
 CREATE INDEX idx_suatchieu_ngay ON SuatChieu(NgayChieu);
@@ -187,7 +228,7 @@ JOIN SuatChieu sc ON dv.MaSuatChieu = sc.MaSuatChieu
 JOIN Phim p ON sc.IdPhim = p.IdPhim
 WHERE kh.Email = 'anguyen@email.com';
 
-
+go
 -- =================================================================
 -- 3. CÁC TRIGGER
 -- =================================================================
@@ -311,7 +352,7 @@ BEGIN
 
     PRINT 'Đặt vé thành công! Mã đặt vé: ' + CAST(@new_datve_id AS VARCHAR(10));
 END
-
+go
 -- Hàm tính tổng doanh thu cho một phim cụ thể
 CREATE FUNCTION TinhDoanhThuPhim (
     @p_IdPhim INT
@@ -319,7 +360,7 @@ CREATE FUNCTION TinhDoanhThuPhim (
 RETURNS DECIMAL(10, 2)
 AS
 BEGIN
-    DECLARE @total_revenue DECIMAL(15, 2);
+    DECLARE @total_revenue DECIMAL(10, 2);
     
     SELECT @total_revenue = SUM(dv.TongTien)
     FROM DatVe dv
