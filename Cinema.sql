@@ -249,9 +249,9 @@ GO
 
 -- Thủ tục để thực hiện đặt vé
 CREATE PROCEDURE sp_DatVe (
-     @p_IdKhachHang INT,
-     @p_MaSuatChieu INT,
-     @p_DanhSachGhe VARCHAR(255) -- Danh sách ID ghế, ví dụ: '1,2,3'
+    @p_IdKhachHang INT,
+    @p_MaSuatChieu INT,
+    @p_DanhSachGhe VARCHAR(255) -- Danh sách ID ghế, ví dụ: '1,2,3'
 )
 AS
 BEGIN
@@ -260,48 +260,63 @@ BEGIN
     DECLARE @new_datve_id INT;
     DECLARE @ghe_id_str VARCHAR(255);
     DECLARE @ghe_id INT;
+    DECLARE @pos INT;
 
     -- Lấy giá vé từ suất chiếu
-    SELECT GiaVe INTO gia_ve_don FROM SuatChieu WHERE MaSuatChieu = @p_MaSuatChieu;
+    SELECT @gia_ve_don = GiaVe FROM SuatChieu WHERE MaSuatChieu = @p_MaSuatChieu;
 
     -- Tạo một đơn đặt vé mới
-    INSERT INTO DatVe(IdKhachHang, MaSuatChieu, TongTien) VALUES (@p_IdKhachHang, @p_MaSuatChieu, 0);
+    INSERT INTO DatVe(IdKhachHang, MaSuatChieu, TongTien) 
+    VALUES (@p_IdKhachHang, @p_MaSuatChieu, 0);
+    
     SET @new_datve_id = SCOPE_IDENTITY();
 
     -- Xử lý danh sách ghế
     SET @ghe_id_str = @p_DanhSachGhe;
     SET @tong_tien_ve = 0;
-	
 
-    WHILE LENGTH(@ghe_id_str) > 0
-        SET @ghe_id = SUBSTRING(@ghe_id_str, ',', 1);
+    WHILE LEN(@ghe_id_str) > 0
+    BEGIN
+        -- Tìm vị trí dấu phẩy
+        SET @pos = CHARINDEX(',', @ghe_id_str);
         
+        IF @pos > 0
+        BEGIN
+            -- Lấy ID ghế trước dấu phẩy
+            SET @ghe_id = CAST(LEFT(@ghe_id_str, @pos - 1) AS INT);
+            -- Cắt bỏ ghế đã lấy
+            SET @ghe_id_str = RIGHT(@ghe_id_str, LEN(@ghe_id_str) - @pos);
+        END
+        ELSE
+        BEGIN
+            -- Lấy ghế cuối cùng
+            SET @ghe_id = CAST(@ghe_id_str AS INT);
+            SET @ghe_id_str = '';
+        END
+
         -- Thêm vào chi tiết đặt vé
-        INSERT INTO ChiTietDatVe(IdDatVe, IdGhe, GiaVe) VALUES (@new_datve_id, @ghe_id, @gia_ve_don);
+        INSERT INTO ChiTietDatVe(IdDatVe, IdGhe, GiaVe) 
+        VALUES (@new_datve_id, @ghe_id, @gia_ve_don);
         
         SET @tong_tien_ve = @tong_tien_ve + @gia_ve_don;
-
-        IF LOCATE(',', @ghe_id_str) > 0 
-            SET @ghe_id_str = SUBSTRING(@ghe_id_str, LEN(',', @ghe_id_str) + 1);
-       ELSE
-            SET @ghe_id_str = '';
-        END 
-    END WHILE; 
+    END
 
     -- Cập nhật tổng tiền cho đơn đặt vé
     UPDATE DatVe SET TongTien = @tong_tien_ve WHERE IdDatVe = @new_datve_id;
 
     -- Cập nhật điểm tích lũy cho khách hàng (ví dụ: 10,000đ = 1 điểm)
-    UPDATE KhachHang SET DiemTichLuy = DiemTichLuy + FLOOR(@tong_tien_ve / 10000) WHERE IdKhachHang = p_IdKhachHang;
+    UPDATE KhachHang 
+    SET DiemTichLuy = DiemTichLuy + FLOOR(@tong_tien_ve / 10000) 
+    WHERE IdKhachHang = @p_IdKhachHang;
 
-    COMMIT;
+    PRINT 'Đặt vé thành công! Mã đặt vé: ' + CAST(@new_datve_id AS VARCHAR(10));
 END
 
 -- Hàm tính tổng doanh thu cho một phim cụ thể
-CREATE FUNCTION fn_TinhDoanhThuPhim (
+CREATE FUNCTION TinhDoanhThuPhim (
     @p_IdPhim INT
 )
-RETURNS DECIMAL(15, 2)
+RETURNS DECIMAL(10, 2)
 AS
 BEGIN
     DECLARE @total_revenue DECIMAL(15, 2);
