@@ -86,6 +86,21 @@ CREATE TABLE ChiTietDatVe (
     CONSTRAINT fk_chitiet_ghe FOREIGN KEY (IdGhe) REFERENCES GheNgoi(IdGhe)
 );	
 Go
+-- Bảng chi tiết thanh toán
+CREATE TABLE ChiTietThanhToan(
+    IdChiTietThanhToan INT PRIMARY KEY IDENTITY(1,1),
+    IdDatVe INT NOT NULL,
+    MaSuatChieu INT NOT NULL,
+    IdGhe INT NOT NULL,
+    GiaVe DECIMAL(10,2),
+    TongTien DECIMAL(12,2),
+    PhuongThucThanhToan NVARCHAR(30),
+    TrangThai NVARCHAR(30),
+    NgayThanhToan DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chitietthanhtoan_datve FOREIGN KEY (IdDatVe) REFERENCES DatVe(IdDatVe),
+    CONSTRAINT fk_chitietthanhtoan_suatchieu FOREIGN KEY (MaSuatChieu) REFERENCES SuatChieu(MaSuatChieu),
+    CONSTRAINT fk_chitietthanhtoan_ghe FOREIGN KEY (IdGhe) REFERENCES GheNgoi(IdGhe)
+);GO
 
 -- Dữ liệu mẫu
 INSERT INTO Phim(TenPhim, TheLoai, ThoiLuong, DaoDien, NgayKhoiChieu) VALUES
@@ -108,8 +123,22 @@ INSERT INTO SuatChieu(IdPhim, IdPhong, NgayChieu, GioBatDau, GioKetThuc, GiaVe) 
 
 INSERT INTO KhachHang(HoTen, Email, Sdt, NgaySinh, GioiTinh, DiemTichLuy) VALUES
 ('Pham Anh Tuan', 'TuanAnh@email.com', '0987654321', '1995-03-20', 'Nam', 1500),
-('Hua Trung Quan', 'quanHua@email.com', '0912345678', '2001-07-15', 'Nữ', 500),
+('Hua Trung Quan', 'quanHua@email.com', '0912345678', '2001-07-15', 'Nam', 500),
 ('Nguyen Duc Nguyen', 'nguyentran@email.com', '0912123678', '2001-07-15', 'Nữ', 500);
+
+-- INSERT dữ liệu vào bảng DatVe
+INSERT INTO DatVe (IdKhachHang, MaSuatChieu, NgayDat, TongTien, TrangThai) 
+VALUES 
+(1, 1, '2024-01-15 14:30:00', 180000.00, 'Da thanh toan'),
+(2, 2, '2024-01-16 10:15:00', 240000.00, 'Da thanh toan'),
+(3, 3, '2024-01-17 19:45:00', 120000.00, 'Cho thanh toan');
+
+-- INSERT dữ liệu vào bảng ChiTietThanhToan
+INSERT INTO ChiTietThanhToan (IdDatVe, MaSuatChieu, IdGhe, GiaVe, TongTien, PhuongThucThanhToan, TrangThai, NgayThanhToan) 
+VALUES 
+(1, 1, 5, 90000.00, 180000.00, N'Thẻ tín dụng', N'Hoàn thành', '2024-01-15 14:35:00'),
+(1, 1, 6, 90000.00, 180000.00, N'Thẻ tín dụng', N'Hoàn thành', '2024-01-15 14:35:00'),
+(2, 2, 12, 120000.00, 240000.00, N'Ví điện tử', N'Hoàn thành', '2024-01-16 10:20:00');
 
 -- Cài đặt Index để tăng tốc truy vấn
 CREATE INDEX idx_phim_theloai ON Phim(TheLoai);
@@ -163,121 +192,128 @@ WHERE kh.Email = 'anguyen@email.com';
 -- 3. CÁC TRIGGER
 -- =================================================================
 
-DELIMITER $$
-
 -- Trigger tự động cập nhật hạng thành viên dựa trên điểm tích lũy
 CREATE TRIGGER trg_CapNhatHangThanhVien
-BEFORE UPDATE ON KhachHang
-FOR EACH ROW
+ON KhachHang
+AFTER UPDATE
+AS
 BEGIN
-    IF NEW.DiemTichLuy >= 5000 THEN
-        SET NEW.HangThanhVien = 'Kim Cương';
-    ELSEIF NEW.DiemTichLuy >= 2000 THEN
-        SET NEW.HangThanhVien = 'Vàng';
-    ELSEIF NEW.DiemTichLuy >= 500 THEN
-        SET NEW.HangThanhVien = 'Bạc';
-    ELSE
-        SET NEW.HangThanhVien = 'Thường';
-    END IF;
-END$$
+    IF UPDATE(DiemTichLuy)
+    BEGIN
+        UPDATE KhachHang
+        SET HangThanhVien = 
+            CASE 
+                WHEN i.DiemTichLuy >= 5000 THEN N'Kim Cương'
+                WHEN i.DiemTichLuy >= 2000 THEN N'Vàng'
+                WHEN i.DiemTichLuy >= 500 THEN N'Bạc'
+                ELSE N'Thường'
+            END
+        FROM KhachHang kh
+        INNER JOIN inserted i ON kh.IdKhachHang = i.IdKhachHang
+    END
+END
+GO
 
 -- Trigger kiểm tra ghế đã được đặt hay chưa trước khi thêm vào ChiTietDatVe
-CREATE TRIGGER trg_KiemTraGheHopLe
-BEFORE INSERT ON ChiTietDatVe
-FOR EACH ROW
+CREATE TRIGGER trg_KiemTraGheDonGian
+ON ChiTietThanhToan
+INSTEAD OF INSERT
+AS
 BEGIN
-    DECLARE ma_suat_chieu INT;
-    DECLARE ghe_da_dat INT;
+    SET NOCOUNT ON;
+    
+    -- Kiểm tra ghế đã đặt
+    IF EXISTS (
+        SELECT 1 
+        FROM inserted i
+        JOIN ChiTietThanhToan cttt ON i.MaSuatChieu = cttt.MaSuatChieu 
+                                   AND i.IdGhe = cttt.IdGhe
+        WHERE cttt.TrangThai IN (N'Đã đặt', N'Đã thanh toán')
+    )
+    BEGIN
+        RAISERROR(N'Lỗi: Một hoặc nhiều ghế đã được đặt cho suất chiếu này.', 16, 1);
+        RETURN;
+    END
 
-    SELECT MaSuatChieu INTO ma_suat_chieu FROM DatVe WHERE IdDatVe = NEW.IdDatVe;
-
-    SELECT COUNT(*) INTO ghe_da_dat
-    FROM ChiTietDatVe ctdv
-    JOIN DatVe dv ON ctdv.IdDatVe = dv.IdDatVe
-    WHERE dv.MaSuatChieu = ma_suat_chieu AND ctdv.IdGhe = NEW.IdGhe;
-
-    IF ghe_da_dat > 0 THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Lỗi: Ghế này đã được đặt cho suất chiếu này.';
-    END IF;
-END$$
-
-DELIMITER ;
-
+    -- Thực hiện insert nếu hợp lệ
+    INSERT INTO ChiTietThanhToan 
+    SELECT * FROM inserted;
+    
+    PRINT N'Đặt ghế thành công!';
+END
+GO
 -- =================================================================
 -- 4. CÁC THỦ TỤC VÀ HÀM
 -- =================================================================
 
-DELIMITER $$
 
 -- Thủ tục để thực hiện đặt vé
 CREATE PROCEDURE sp_DatVe (
-    IN p_IdKhachHang INT,
-    IN p_MaSuatChieu INT,
-    IN p_DanhSachGhe VARCHAR(255) -- Danh sách ID ghế, ví dụ: '1,2,3'
+     @p_IdKhachHang INT,
+     @p_MaSuatChieu INT,
+     @p_DanhSachGhe VARCHAR(255) -- Danh sách ID ghế, ví dụ: '1,2,3'
 )
+AS
 BEGIN
-    DECLARE tong_tien_ve DECIMAL(10, 2);
-    DECLARE gia_ve_don DECIMAL(10, 2);
-    DECLARE new_datve_id INT;
-    DECLARE ghe_id_str VARCHAR(255);
-    DECLARE ghe_id INT;
+    DECLARE @tong_tien_ve DECIMAL(10, 2);
+    DECLARE @gia_ve_don DECIMAL(10, 2);
+    DECLARE @new_datve_id INT;
+    DECLARE @ghe_id_str VARCHAR(255);
+    DECLARE @ghe_id INT;
 
     -- Lấy giá vé từ suất chiếu
-    SELECT GiaVe INTO gia_ve_don FROM SuatChieu WHERE MaSuatChieu = p_MaSuatChieu;
-
-    -- Bắt đầu giao dịch
-    START TRANSACTION;
+    SELECT GiaVe INTO gia_ve_don FROM SuatChieu WHERE MaSuatChieu = @p_MaSuatChieu;
 
     -- Tạo một đơn đặt vé mới
-    INSERT INTO DatVe(IdKhachHang, MaSuatChieu, TongTien) VALUES (p_IdKhachHang, p_MaSuatChieu, 0);
-    SET new_datve_id = LAST_INSERT_ID();
+    INSERT INTO DatVe(IdKhachHang, MaSuatChieu, TongTien) VALUES (@p_IdKhachHang, @p_MaSuatChieu, 0);
+    SET @new_datve_id = SCOPE_IDENTITY();
 
     -- Xử lý danh sách ghế
-    SET ghe_id_str = p_DanhSachGhe;
-    SET tong_tien_ve = 0;
+    SET @ghe_id_str = @p_DanhSachGhe;
+    SET @tong_tien_ve = 0;
+	
 
-    WHILE LENGTH(ghe_id_str) > 0 DO
-        SET ghe_id = SUBSTRING_INDEX(ghe_id_str, ',', 1);
+    WHILE LENGTH(@ghe_id_str) > 0
+        SET @ghe_id = SUBSTRING(@ghe_id_str, ',', 1);
         
         -- Thêm vào chi tiết đặt vé
-        INSERT INTO ChiTietDatVe(IdDatVe, IdGhe, GiaVe) VALUES (new_datve_id, ghe_id, gia_ve_don);
+        INSERT INTO ChiTietDatVe(IdDatVe, IdGhe, GiaVe) VALUES (@new_datve_id, @ghe_id, @gia_ve_don);
         
-        SET tong_tien_ve = tong_tien_ve + gia_ve_don;
+        SET @tong_tien_ve = @tong_tien_ve + @gia_ve_don;
 
-        IF LOCATE(',', ghe_id_str) > 0 THEN
-            SET ghe_id_str = SUBSTRING(ghe_id_str, LOCATE(',', ghe_id_str) + 1);
-        ELSE
-            SET ghe_id_str = '';
-        END IF;
-    END WHILE;
+        IF LOCATE(',', @ghe_id_str) > 0 
+            SET @ghe_id_str = SUBSTRING(@ghe_id_str, LEN(',', @ghe_id_str) + 1);
+       ELSE
+            SET @ghe_id_str = '';
+        END 
+    END WHILE; 
 
     -- Cập nhật tổng tiền cho đơn đặt vé
-    UPDATE DatVe SET TongTien = tong_tien_ve WHERE IdDatVe = new_datve_id;
+    UPDATE DatVe SET TongTien = @tong_tien_ve WHERE IdDatVe = @new_datve_id;
 
     -- Cập nhật điểm tích lũy cho khách hàng (ví dụ: 10,000đ = 1 điểm)
-    UPDATE KhachHang SET DiemTichLuy = DiemTichLuy + FLOOR(tong_tien_ve / 10000) WHERE IdKhachHang = p_IdKhachHang;
+    UPDATE KhachHang SET DiemTichLuy = DiemTichLuy + FLOOR(@tong_tien_ve / 10000) WHERE IdKhachHang = p_IdKhachHang;
 
     COMMIT;
-END$$
+END
 
 -- Hàm tính tổng doanh thu cho một phim cụ thể
 CREATE FUNCTION fn_TinhDoanhThuPhim (
-    p_IdPhim INT
+    @p_IdPhim INT
 )
 RETURNS DECIMAL(15, 2)
-DETERMINISTIC
+AS
 BEGIN
-    DECLARE total_revenue DECIMAL(15, 2);
+    DECLARE @total_revenue DECIMAL(15, 2);
     
-    SELECT SUM(dv.TongTien) INTO total_revenue
+    SELECT @total_revenue = SUM(dv.TongTien)
     FROM DatVe dv
     JOIN SuatChieu sc ON dv.MaSuatChieu = sc.MaSuatChieu
-    WHERE sc.IdPhim = p_IdPhim;
+    WHERE sc.IdPhim = @p_IdPhim;
     
-    RETURN IFNULL(total_revenue, 0);
-END$$
+    RETURN ISNULL(@total_revenue, 0);
+END
 
-DELIMITER ;
 
 -- Ví dụ cách gọi thủ tục và hàm
 -- CALL sp_DatVe(1, 1, '4,5'); -- Khách hàng 1, đặt suất chiếu 1, ghế 4 và 5
